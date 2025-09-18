@@ -1,0 +1,16 @@
+{
+  "name": "shopify-csv-generator",
+  "version": "1.0.0",
+  "description": "Fetch latest 50 Shopify products and generate CSV for import. Vercel-ready.",
+  "main": "api/generate.js",
+  "scripts": {
+    "start": "vercel dev",
+    "test": "node api/generate.js"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  },
+  "engines": {
+    "node": "22.x"
+  }
+}
