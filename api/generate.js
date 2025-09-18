@@ -81,19 +81,23 @@ async function buildCsvRows(shopDomain, token) {
 
   const data = await shopifyGraphQL(shopDomain, token, query);
   const rows = [];
-  const products = data.data.products.edges;
+  const products = (data && data.data && data.data.products && data.data.products.edges) ? data.data.products.edges : [];
+
   for (const pEdge of products) {
     const p = pEdge.node;
     const productId = gidToId(p.id);
-    const fullName = p.title || '';
+    const productTitle = p.title || '';
     const baseName = p.handle || '';
     const productType = p.productType || STATIC_DEFAULTS["Product Type"];
 
-    const variants = p.variants.edges;
+    const variants = (p.variants && p.variants.edges) ? p.variants.edges : [];
+
+    // If no variants, create a single row with empty variant fields
     if (!variants || variants.length === 0) {
+      const fullNameNoVariant = productTitle; // no variant to append
       const row = [
         productId,
-        fullName,
+        fullNameNoVariant,
         baseName,
         "",
         "",
@@ -118,19 +122,29 @@ async function buildCsvRows(shopDomain, token) {
       ];
       rows.push(row);
     } else {
+      // For each variant, include variant in FULL NAME (cleaned)
       for (const vEdge of variants) {
         const v = vEdge.node;
         const variantId = gidToId(v.id);
-        const variantName = v.title || '';
-        // Dynamic fields (first five) are taken from Shopify API; rest are static defaults
+        const variantNameRaw = v.title || '';
+
+        // Clean variant name: remove single and double quotes
+        const cleanedVariantName = variantNameRaw.replace(/['"]/g, '');
+
+        // Build FULL NAME as "Product Title - Variant Title (cleaned)"
+        const fullName = cleanedVariantName ? `${productTitle} - ${cleanedVariantName}` : productTitle;
+
+        const price = v.price || STATIC_DEFAULTS["price"];
+        const inventory = (v.inventoryQuantity !== undefined && v.inventoryQuantity !== null) ? v.inventoryQuantity : STATIC_DEFAULTS["Initial Stock"];
+
         const row = [
           productId,                // shopify_product_id (dynamic)
-          fullName,                 // FULL NAME (dynamic)
+          fullName,                 // FULL NAME (product + " - " + variant cleaned)
           baseName,                 // product_base_name (dynamic)
           variantId,                // shopify_variant_id (dynamic)
-          variantName,              // product_variant_name (dynamic)
+          variantNameRaw,           // product_variant_name (dynamic, not cleaned)
           STATIC_DEFAULTS["Purchase Rate"],
-          STATIC_DEFAULTS["price"],
+          price,
           STATIC_DEFAULTS["hsn"],
           STATIC_DEFAULTS["Inter State Tax Rate"],
           STATIC_DEFAULTS["Desc"],
@@ -138,7 +152,7 @@ async function buildCsvRows(shopDomain, token) {
           STATIC_DEFAULTS["Account"],
           STATIC_DEFAULTS["Usage unit"],
           STATIC_DEFAULTS["Purchase Account"],
-          STATIC_DEFAULTS["Initial Stock"],
+          inventory,
           STATIC_DEFAULTS["Inventory Account"],
           STATIC_DEFAULTS["Item Type"],
           STATIC_DEFAULTS["Status"],
