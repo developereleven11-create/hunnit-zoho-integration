@@ -2,19 +2,18 @@
 const { shopifyGraphQL, gidToId } = require('../utils/shopify');
 
 const headers = [
-  "shopify_product_id",
-  "variant_id",
-  "handle",
   "title",
-  "product_type",
-  "options",
-  "variant_json"
+  "handle",
+  "shopify_product_id",
+  "variant_name",
+  "variant_id",
+  "product_type"
 ];
 
 function csvEscape(v) {
   if (v === null || v === undefined) return '';
-  const s = typeof v === 'string' ? v : JSON.stringify(v);
-  return '"' + String(s).replace(/"/g, '""') + '"';
+  const s = typeof v === 'string' ? v : String(v);
+  return '"' + s.replace(/"/g, '""') + '"';
 }
 
 async function fetchAllProducts(shopDomain, token) {
@@ -34,19 +33,11 @@ async function fetchAllProducts(shopDomain, token) {
               handle
               title
               productType
-              options { id name values }
               variants(first:250) {
                 edges {
                   node {
                     id
                     title
-                    sku
-                    barcode
-                    price
-                    compareAtPrice
-                    inventoryQuantity
-                    availableForSale
-                    selectedOptions { name value }
                   }
                 }
               }
@@ -68,42 +59,26 @@ async function fetchAllProducts(shopDomain, token) {
   return products;
 }
 
-function productOptionsString(p) {
-  return (p.options || []).map(o => `${o.name}:${(o.values||[]).join('|')}`).join(';');
-}
-
-function variantToSimpleObject(v) {
-  return {
-    id: gidToId(v.id),
-    title: v.title || '',
-    sku: v.sku || '',
-    barcode: v.barcode || '',
-    price: v.price || '',
-    compareAtPrice: v.compareAtPrice || '',
-    inventoryQuantity: v.inventoryQuantity || null,
-    availableForSale: v.availableForSale || false,
-    selectedOptions: v.selectedOptions || []
-  };
-}
-
 async function buildCsvRows(shopDomain, token) {
   const products = await fetchAllProducts(shopDomain, token);
   const rows = [];
   for (const p of products) {
     const productId = gidToId(p.id);
-    const optionsStr = productOptionsString(p);
+    const title = p.title || '';
+    const handle = p.handle || '';
+    const productType = p.productType || '';
     const variantEdges = (p.variants && p.variants.edges) ? p.variants.edges : [];
     for (const ve of variantEdges) {
       const v = ve.node;
-      const variantObj = variantToSimpleObject(v);
+      const variantId = gidToId(v.id);
+      const variantName = v.title || '';
       rows.push([
+        title,
+        handle,
         productId,
-        variantObj.id,
-        p.handle || '',
-        p.title || '',
-        p.productType || '',
-        optionsStr,
-        JSON.stringify(variantObj)
+        variantName,
+        variantId,
+        productType
       ]);
     }
   }
@@ -123,7 +98,7 @@ module.exports = async (req, res) => {
     const csv = csvLines.join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=shopify_variants.csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=shopify_variants_simple.csv');
     res.status(200).send(csv);
   } catch (err) {
     console.error(err);
