@@ -1,16 +1,15 @@
 {
-  "name": "shopify-csv-generator",
+  "name": "hunnit-shopify-export",
   "version": "1.0.0",
-  "description": "Fetch latest 50 Shopify products and generate CSV for import. Vercel-ready.",
+  "description": "Export Shopify full product details to CSV (API route for Vercel)",
   "main": "api/generate.js",
   "scripts": {
-    "start": "vercel dev",
-    "test": "node api/generate.js"
+    "start": "node api/generate.js"
   },
   "dependencies": {
     "node-fetch": "^2.6.7"
   },
   "engines": {
-    "node": "22.x"
+    "node": "18.x"
   }
 }
