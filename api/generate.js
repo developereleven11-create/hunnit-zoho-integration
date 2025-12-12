@@ -1,20 +1,14 @@
+// api/generate.js
 const { shopifyGraphQL, gidToId } = require('../utils/shopify');
 
 const headers = [
   "shopify_product_id",
+  "variant_id",
   "handle",
   "title",
-  "body_html",
   "product_type",
-  "vendor",
-  "tags",
-  "published_at",
-  "created_at",
-  "updated_at",
   "options",
-  "image_urls",
-  "metafields_json",
-  "variants_json"
+  "variant_json"
 ];
 
 function csvEscape(v) {
@@ -24,7 +18,6 @@ function csvEscape(v) {
 }
 
 async function fetchAllProducts(shopDomain, token) {
-  // Use GraphQL pagination to fetch all products (250 per page max)
   let hasNext = true;
   let cursor = null;
   const products = [];
@@ -40,20 +33,8 @@ async function fetchAllProducts(shopDomain, token) {
               id
               handle
               title
-              descriptionHtml
               productType
-              vendor
-              tags
-              publishedAt
-              createdAt
-              updatedAt
               options { id name values }
-              images(first:250) {
-                edges { node { id url altText width height } }
-              }
-              metafields(first:250) {
-                edges { node { id namespace key value type description } }
-              }
               variants(first:250) {
                 edges {
                   node {
@@ -63,12 +44,9 @@ async function fetchAllProducts(shopDomain, token) {
                     barcode
                     price
                     compareAtPrice
-                    weight
-                    weightUnit
                     inventoryQuantity
                     availableForSale
                     selectedOptions { name value }
-                    image { id url altText }
                   }
                 }
               }
@@ -90,54 +68,45 @@ async function fetchAllProducts(shopDomain, token) {
   return products;
 }
 
-function mapProductToRow(p) {
-  // options as semicolon separated option:values
-  const options = (p.options || []).map(o => `${o.name}:${(o.values||[]).join('|')}`).join(';');
-  const images = (p.images && p.images.edges) ? p.images.edges.map(e => e.node.url) : [];
-  const metafields = (p.metafields && p.metafields.edges) ? p.metafields.edges.map(e => ({
-    id: e.node.id,
-    namespace: e.node.namespace,
-    key: e.node.key,
-    value: e.node.value,
-    type: e.node.type,
-    description: e.node.description
-  })) : [];
-  const variants = (p.variants && p.variants.edges) ? p.variants.edges.map(e => ({
-    id: e.node.id,
-    title: e.node.title,
-    sku: e.node.sku,
-    barcode: e.node.barcode,
-    price: e.node.price,
-    compareAtPrice: e.node.compareAtPrice,
-    weight: e.node.weight,
-    weightUnit: e.node.weightUnit,
-    inventoryQuantity: e.node.inventoryQuantity,
-    availableForSale: e.node.availableForSale,
-    selectedOptions: e.node.selectedOptions,
-    image: e.node.image ? e.node.image.url : null
-  })) : [];
+function productOptionsString(p) {
+  return (p.options || []).map(o => `${o.name}:${(o.values||[]).join('|')}`).join(';');
+}
 
-  return [
-    gidToId(p.id),
-    p.handle || '',
-    p.title || '',
-    p.descriptionHtml || '',
-    p.productType || '',
-    p.vendor || '',
-    Array.isArray(p.tags) ? p.tags.join(',') : (p.tags || ''),
-    p.publishedAt || '',
-    p.createdAt || '',
-    p.updatedAt || '',
-    options,
-    images.join('|'),
-    JSON.stringify(metafields),
-    JSON.stringify(variants)
-  ];
+function variantToSimpleObject(v) {
+  return {
+    id: gidToId(v.id),
+    title: v.title || '',
+    sku: v.sku || '',
+    barcode: v.barcode || '',
+    price: v.price || '',
+    compareAtPrice: v.compareAtPrice || '',
+    inventoryQuantity: v.inventoryQuantity || null,
+    availableForSale: v.availableForSale || false,
+    selectedOptions: v.selectedOptions || []
+  };
 }
 
 async function buildCsvRows(shopDomain, token) {
   const products = await fetchAllProducts(shopDomain, token);
-  const rows = products.map(mapProductToRow);
+  const rows = [];
+  for (const p of products) {
+    const productId = gidToId(p.id);
+    const optionsStr = productOptionsString(p);
+    const variantEdges = (p.variants && p.variants.edges) ? p.variants.edges : [];
+    for (const ve of variantEdges) {
+      const v = ve.node;
+      const variantObj = variantToSimpleObject(v);
+      rows.push([
+        productId,
+        variantObj.id,
+        p.handle || '',
+        p.title || '',
+        p.productType || '',
+        optionsStr,
+        JSON.stringify(variantObj)
+      ]);
+    }
+  }
   return rows;
 }
 
@@ -154,7 +123,7 @@ module.exports = async (req, res) => {
     const csv = csvLines.join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=shopify_all_products.csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=shopify_variants.csv');
     res.status(200).send(csv);
   } catch (err) {
     console.error(err);
