@@ -1,45 +1,28 @@
+# Shopify Full Product Export (Vercel API)
 
-# Shopify CSV Generator
+This small Vercel serverless function exports **full product details** from a Shopify store into a downloadable CSV.
 
-Generates a CSV with the exact headers you provided for the **latest 50** uploaded Shopify products (one row per variant) and returns it as a downloadable file.
+## Files
+- `api/generate.js` — main API endpoint. Exports product-level info including options, images, metafields, and variants (variants and metafields are JSON strings in CSV).
+- `utils/shopify.js` — helper to call Shopify GraphQL.
+- `package.json` — project dependencies.
+- `vercel.json` — Vercel config.
 
-## Quick setup
+## Deploy (no CLI)
+1. Create a new GitHub repository and copy this project structure into it (commit and push).
+2. On Vercel, click **Import Project** → choose your GitHub repo → Deploy.
+3. Add environment variables in Vercel Dashboard:
+   - `SHOP_DOMAIN` (e.g. `your-store.myshopify.com`)
+   - `SHOP_TOKEN` (Admin API access token with read_products scope)
 
-1. Create a new GitHub repository and push the contents of this project.
-2. On Vercel, import the GitHub repo and set these Environment Variables:
-   - `SHOP_DOMAIN` — yourshop.myshopify.com
-   - `SHOP_TOKEN` — Admin API access token with `read_products` scope
+> Quick test (not secure): you can also open the endpoint in browser with query params (only for quick testing):
+> `https://<your-vercel-app>.vercel.app/api/generate?SHOP_DOMAIN=your-store.myshopify.com&SHOP_TOKEN=shpat_xxx`
+> But do **not** put sensitive tokens in public links for production.
 
-3. Deploy on Vercel. After deployment visit:
-   `https://<your-vercel-app>/api/generate`
+## Output
+- Downloads `shopify_all_products.csv`.
+- Columns include product metadata and JSON strings under `metafields_json` and `variants_json`. If you’d prefer one CSV row per variant, I can change it to a flattened export.
 
-It will return a CSV file as an attachment (Content-Disposition).
-
-## Notes & Mapping
-
-- This function fetches the latest 50 products sorted by `createdAt` (newest first).
-- For `shopify_product_id` and `shopify_variant_id` the script extracts the numeric Shopify IDs from the GraphQL global IDs.
-- Many import/accounting-specific columns (eg. `Purchase Rate`, `hsn`, tax names/types, accounts) are left blank — you can fill defaults in `api/generate.js` if you want automatic values.
-- Column header names are preserved exactly as you provided.
-
-## Local test
-
-Install dependencies:
-
-```bash
-npm install
-node api/generate.js
-```
-
-This will run a simple fetch and print CSV to stdout if you set `SHOP_DOMAIN` and `SHOP_TOKEN` in your environment.
-
-## File list
-
-- `api/generate.js` — Vercel serverless function that generates the CSV
-- `utils/shopify.js` — helper to call Shopify GraphQL
-- `package.json`, `vercel.json`, `.gitignore`, `README.md`
-
-
-
-## Static defaults applied
-The CSV generator now applies the exact static values you provided for all non-dynamic columns. Dynamic columns fetched from Shopify API: `shopify_product_id`, `FULL NAME`, `product_base_name`, `shopify_variant_id`, `product_variant_name`.
+## Notes
+- The function paginates through Shopify GraphQL (250 per page) and will fetch all store products — for big catalogs this may take time or hit Shopify rate limits.
+- Uses Shopify Admin GraphQL API version `2024-10`. Update `utils/shopify.js` if you want a different API version.
