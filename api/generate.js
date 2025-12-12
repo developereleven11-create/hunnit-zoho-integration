@@ -2,195 +2,149 @@ const { shopifyGraphQL, gidToId } = require('../utils/shopify');
 
 const headers = [
   "shopify_product_id",
-  "FULL NAME",
-  "product_base_name",
-  "shopify_variant_id",
-  "product_variant_name",
-  "Purchase Rate",
-  "price",
-  "hsn",
-  "Inter State Tax Rate",
-  "Desc",
-  "Product Type",
-  "Account",
-  "Usage unit",
-  "Purchase Account",
-  "Initial Stock",
-  "Inventory Account",
-  "Item Type",
-  "Status",
-  "Inter State Tax Name",
-  "Inter State Tax Type",
-  "Intra State Tax Name",
-  "Intra State Tax Type",
-  "Intra State Tax Rate"
+  "handle",
+  "title",
+  "body_html",
+  "product_type",
+  "vendor",
+  "tags",
+  "published_at",
+  "created_at",
+  "updated_at",
+  "options",
+  "image_urls",
+  "metafields_json",
+  "variants_json"
 ];
 
-// User-provided static defaults for the non-dynamic columns
-const STATIC_DEFAULTS = {
-  "Purchase Rate": "0",
-  "price": "1400",
-  "hsn": "6206",
-  "Inter State Tax Rate": "12.00",
-  "Desc": "",
-  "Product Type": "goods",
-  "Account": "Sales",
-  "Usage unit": "pcs",
-  "Purchase Account": "Cost of Goods Sold",
-  "Initial Stock": "1,000.00",
-  "Inventory Account": "",
-  "Item Type": "Inventory",
-  "Status": "Active",
-  "Inter State Tax Name": "IGST12",
-  "Inter State Tax Type": "Simple",
-  "Intra State Tax Name": "GST12",
-  "Intra State Tax Type": "Group",
-  "Intra State Tax Rate": "12.00"
-};
-
-function csvEscape(s) {
-  if (s === undefined || s === null) return '';
-  const str = String(s);
-  return '"' + str.replace(/"/g, '""') + '"';
+function csvEscape(v) {
+  if (v === null || v === undefined) return '';
+  const s = typeof v === 'string' ? v : JSON.stringify(v);
+  return '"' + String(s).replace(/"/g, '""') + '"';
 }
 
-async function buildCsvRows(shopDomain, token) {
-  const query = `query getLatest50Products {
-    products(first: 50, sortKey: CREATED_AT, reverse: true) {
-      edges {
-        node {
-          id
-          title
-          handle
-          productType
-          variants(first: 250) {
-            edges {
-              node {
-                id
-                title
-                sku
-                price
-                inventoryQuantity
+async function fetchAllProducts(shopDomain, token) {
+  // Use GraphQL pagination to fetch all products (250 per page max)
+  let hasNext = true;
+  let cursor = null;
+  const products = [];
+  while (hasNext) {
+    const after = cursor ? `, after: "${cursor}"` : '';
+    const query = `
+      {
+        products(first: 250${after}) {
+          pageInfo { hasNextPage }
+          edges {
+            cursor
+            node {
+              id
+              handle
+              title
+              descriptionHtml
+              productType
+              vendor
+              tags
+              publishedAt
+              createdAt
+              updatedAt
+              options { id name values }
+              images(first:250) {
+                edges { node { id url altText width height } }
+              }
+              metafields(first:250) {
+                edges { node { id namespace key value type description } }
+              }
+              variants(first:250) {
+                edges {
+                  node {
+                    id
+                    title
+                    sku
+                    barcode
+                    price
+                    compareAtPrice
+                    weight
+                    weightUnit
+                    inventoryQuantity
+                    availableForSale
+                    selectedOptions { name value }
+                    image { id url altText }
+                  }
+                }
               }
             }
           }
         }
-      }
+      }`;
+    const json = await shopifyGraphQL(shopDomain, token, query);
+    if (!json || !json.data || !json.data.products) {
+      throw new Error('Unexpected response from Shopify GraphQL: ' + JSON.stringify(json));
     }
-  }`;
-
-  const data = await shopifyGraphQL(shopDomain, token, query);
-  const rows = [];
-  const products = (data && data.data && data.data.products && data.data.products.edges) ? data.data.products.edges : [];
-
-  for (const pEdge of products) {
-    const p = pEdge.node;
-    const productId = gidToId(p.id);
-    const productTitle = p.title || '';
-    const baseName = p.handle || '';
-    const productType = p.productType || STATIC_DEFAULTS["Product Type"];
-
-    const variants = (p.variants && p.variants.edges) ? p.variants.edges : [];
-
-    // If no variants, create a single row with empty variant fields
-    if (!variants || variants.length === 0) {
-      const fullNameNoVariant = productTitle; // no variant to append
-      const row = [
-        productId,
-        fullNameNoVariant,
-        baseName,
-        "",
-        "",
-        STATIC_DEFAULTS["Purchase Rate"],
-        STATIC_DEFAULTS["price"],
-        STATIC_DEFAULTS["hsn"],
-        STATIC_DEFAULTS["Inter State Tax Rate"],
-        STATIC_DEFAULTS["Desc"],
-        productType,
-        STATIC_DEFAULTS["Account"],
-        STATIC_DEFAULTS["Usage unit"],
-        STATIC_DEFAULTS["Purchase Account"],
-        STATIC_DEFAULTS["Initial Stock"],
-        STATIC_DEFAULTS["Inventory Account"],
-        STATIC_DEFAULTS["Item Type"],
-        STATIC_DEFAULTS["Status"],
-        STATIC_DEFAULTS["Inter State Tax Name"],
-        STATIC_DEFAULTS["Inter State Tax Type"],
-        STATIC_DEFAULTS["Intra State Tax Name"],
-        STATIC_DEFAULTS["Intra State Tax Type"],
-        STATIC_DEFAULTS["Intra State Tax Rate"]
-      ];
-      rows.push(row);
-    } else {
-      // For each variant, include variant in FULL NAME (cleaned)
-      for (const vEdge of variants) {
-        const v = vEdge.node;
-        const variantId = gidToId(v.id);
-        const variantNameRaw = v.title || '';
-
-        // Clean variant name: remove single and double quotes
-        const cleanedVariantName = variantNameRaw.replace(/['"]/g, '');
-
-        // Build FULL NAME as "Product Title - Variant Title (cleaned)"
-        const fullName = cleanedVariantName ? `${productTitle} - ${cleanedVariantName}` : productTitle;
-
-        const price = v.price || STATIC_DEFAULTS["price"];
-        const inventory = (v.inventoryQuantity !== undefined && v.inventoryQuantity !== null) ? v.inventoryQuantity : STATIC_DEFAULTS["Initial Stock"];
-
-        const row = [
-          productId,                // shopify_product_id (dynamic)
-          fullName,                 // FULL NAME (product + " - " + variant cleaned)
-          baseName,                 // product_base_name (dynamic)
-          variantId,                // shopify_variant_id (dynamic)
-          variantNameRaw,           // product_variant_name (dynamic, not cleaned)
-          STATIC_DEFAULTS["Purchase Rate"],
-          price,
-          STATIC_DEFAULTS["hsn"],
-          STATIC_DEFAULTS["Inter State Tax Rate"],
-          STATIC_DEFAULTS["Desc"],
-          productType,
-          STATIC_DEFAULTS["Account"],
-          STATIC_DEFAULTS["Usage unit"],
-          STATIC_DEFAULTS["Purchase Account"],
-          inventory,
-          STATIC_DEFAULTS["Inventory Account"],
-          STATIC_DEFAULTS["Item Type"],
-          STATIC_DEFAULTS["Status"],
-          STATIC_DEFAULTS["Inter State Tax Name"],
-          STATIC_DEFAULTS["Inter State Tax Type"],
-          STATIC_DEFAULTS["Intra State Tax Name"],
-          STATIC_DEFAULTS["Intra State Tax Type"],
-          STATIC_DEFAULTS["Intra State Tax Rate"]
-        ];
-        rows.push(row);
-      }
+    const prodEdges = json.data.products.edges || [];
+    for (const edge of prodEdges) {
+      products.push(edge.node);
+      cursor = edge.cursor;
     }
+    hasNext = json.data.products.pageInfo.hasNextPage;
   }
+  return products;
+}
+
+function mapProductToRow(p) {
+  // options as semicolon separated option:values
+  const options = (p.options || []).map(o => `${o.name}:${(o.values||[]).join('|')}`).join(';');
+  const images = (p.images && p.images.edges) ? p.images.edges.map(e => e.node.url) : [];
+  const metafields = (p.metafields && p.metafields.edges) ? p.metafields.edges.map(e => ({
+    id: e.node.id,
+    namespace: e.node.namespace,
+    key: e.node.key,
+    value: e.node.value,
+    type: e.node.type,
+    description: e.node.description
+  })) : [];
+  const variants = (p.variants && p.variants.edges) ? p.variants.edges.map(e => ({
+    id: e.node.id,
+    title: e.node.title,
+    sku: e.node.sku,
+    barcode: e.node.barcode,
+    price: e.node.price,
+    compareAtPrice: e.node.compareAtPrice,
+    weight: e.node.weight,
+    weightUnit: e.node.weightUnit,
+    inventoryQuantity: e.node.inventoryQuantity,
+    availableForSale: e.node.availableForSale,
+    selectedOptions: e.node.selectedOptions,
+    image: e.node.image ? e.node.image.url : null
+  })) : [];
+
+  return [
+    gidToId(p.id),
+    p.handle || '',
+    p.title || '',
+    p.descriptionHtml || '',
+    p.productType || '',
+    p.vendor || '',
+    Array.isArray(p.tags) ? p.tags.join(',') : (p.tags || ''),
+    p.publishedAt || '',
+    p.createdAt || '',
+    p.updatedAt || '',
+    options,
+    images.join('|'),
+    JSON.stringify(metafields),
+    JSON.stringify(variants)
+  ];
+}
+
+async function buildCsvRows(shopDomain, token) {
+  const products = await fetchAllProducts(shopDomain, token);
+  const rows = products.map(mapProductToRow);
   return rows;
 }
 
-// This file can run standalone (node api/generate.js) for quick tests or be used as a Vercel function.
-async function mainStandalone() {
-  const shopDomain = process.env.SHOP_DOMAIN;
-  const token = process.env.SHOP_TOKEN;
-  if (!shopDomain || !token) {
-    console.error('Set SHOP_DOMAIN and SHOP_TOKEN environment variables to run locally.');
-    process.exit(1);
-  }
-  const rows = await buildCsvRows(shopDomain, token);
-  const csv = headers.map(h => csvEscape(h)).join(',') + '\n' + rows.map(r => r.map(csvEscape).join(',')).join('\n');
-  console.log(csv);
-}
-
-if (require.main === module) {
-  mainStandalone();
-}
-
-// Vercel handler export
 module.exports = async (req, res) => {
   try {
-    const shopDomain = process.env.SHOP_DOMAIN;
-    const token = process.env.SHOP_TOKEN;
+    const shopDomain = process.env.SHOP_DOMAIN || req.query.SHOP_DOMAIN || req.body.SHOP_DOMAIN;
+    const token = process.env.SHOP_TOKEN || req.query.SHOP_TOKEN || req.body.SHOP_TOKEN;
     if (!shopDomain || !token) {
       res.status(400).send('Missing SHOP_DOMAIN or SHOP_TOKEN environment variables.');
       return;
@@ -200,7 +154,7 @@ module.exports = async (req, res) => {
     const csv = csvLines.join('\n');
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', 'attachment; filename=shopify_latest_50_products.csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=shopify_all_products.csv');
     res.status(200).send(csv);
   } catch (err) {
     console.error(err);
